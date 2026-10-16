@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Ani Tracker Mobile</title>
+  <style>
+    :root { --primary: #3b82f6; --bg-color: #f3f4f6; --card-bg: #ffffff; --text-main: #1f2937; --text-sub: #6b7280; --border: #e5e7eb; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: var(--bg-color); color: var(--text-main); }
+    header { background-color: var(--card-bg); position: sticky; top: 0; z-index: 10; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .header-title { display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; font-size: 1.2rem; font-weight: bold; }
+    .btn-refresh { background: none; border: none; font-size: 1.2rem; cursor: pointer; }
+    .tabs { display: flex; border-top: 1px solid var(--border); }
+    .tab { flex: 1; text-align: center; padding: 12px 0; font-weight: 600; color: var(--text-sub); background: none; border: none; border-bottom: 3px solid transparent; cursor: pointer; transition: all 0.2s; }
+    .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+    main { padding: 15px; padding-bottom: 80px; }
+    .anime-card { background-color: var(--card-bg); border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+    .anime-info h3 { font-size: 1rem; margin-bottom: 4px; word-break: keep-all; }
+    .anime-info p { font-size: 0.8rem; color: var(--text-sub); }
+    .progress-badge { background-color: #dbeafe; color: var(--primary); padding: 4px 8px; border-radius: 20px; font-size: 0.8rem; font-weight: bold; }
+    .completed-badge { background-color: #dcfce7; color: #16a34a; }
+    #loading { text-align: center; padding: 40px; color: var(--text-sub); }
+    #detail-view { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--card-bg); z-index: 20; display: flex; flex-direction: column; transform: translateY(100%); transition: transform 0.3s ease; }
+    #detail-view.show { transform: translateY(0); }
+    .detail-header { display: flex; align-items: center; padding: 15px; border-bottom: 1px solid var(--border); background-color: var(--card-bg); }
+    .btn-back { background: none; border: none; font-size: 1.2rem; margin-right: 15px; cursor: pointer; }
+    .detail-title { font-size: 1.1rem; font-weight: bold; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .btn-main-link { background: var(--primary); color: white; border: none; padding: 6px 12px; border-radius: 6px; font-size: 0.85rem; cursor: pointer; text-decoration: none; display: inline-block; }
+    .episodes-list { flex: 1; overflow-y: auto; padding: 15px; background-color: var(--bg-color); }
+    .ep-row { background-color: var(--card-bg); padding: 15px; border-radius: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+    .ep-row.watched { background-color: #dcfce7; }
+    .ep-info { display: flex; flex-direction: column; gap: 4px; }
+    .ep-number { font-weight: bold; font-size: 1rem; }
+    .ep-memo { font-size: 0.85rem; color: var(--text-sub); }
+    .ep-actions { display: flex; align-items: center; gap: 10px; }
+    .btn-play { background-color: #e5e7eb; color: #374151; padding: 5px 10px; border-radius: 6px; font-size: 0.8rem; text-decoration: none; font-weight: bold; }
+    .btn-play:active { background-color: #d1d5db; }
+    .ep-check-icon { font-size: 1.2rem; color: #16a34a; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-title">
+      <span>📱 AniLife Tracker</span>
+      <button class="btn-refresh" onclick="fetchData()">🔄</button>
+    </div>
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('watching')">보고 있는 애니</button>
+      <button class="tab" onclick="switchTab('completed')">다 본 애니</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="loading">데이터를 불러오는 중입니다...</div>
+    <div id="anime-list-container"></div>
+  </main>
+
+  <div id="detail-view">
+    <div class="detail-header">
+      <button class="btn-back" onclick="closeDetail()">⬅️</button>
+      <div class="detail-title" id="detail-title">애니 제목</div>
+      <a href="#" id="detail-main-link" target="_blank" class="btn-main-link" style="display:none;">작품 이동</a>
+    </div>
+    <div class="episodes-list" id="episodes-container"></div>
+  </div>
+
+  <script>
+    const DB_URL = "https://anitraker-19593-default-rtdb.firebaseio.com/aniTracker.json";
+    let allData = {};
+    let currentTab = 'watching';
+
+    async function fetchData() {
+      document.getElementById('loading').style.display = 'block';
+      document.getElementById('anime-list-container').innerHTML = '';
+      try {
+        const response = await fetch(DB_URL);
+        const data = await response.json();
+        if (data && data.animeData) { allData = data; renderList(); } 
+        else { document.getElementById('loading').innerText = "저장된 데이터가 없습니다."; }
+      } catch (error) { document.getElementById('loading').innerText = "오류가 발생했습니다."; }
+    }
+
+    window.switchTab = function(tabName) {
+      currentTab = tabName;
+      const tabs = document.querySelectorAll('.tab');
+      tabs[0].classList.toggle('active', tabName === 'watching');
+      tabs[1].classList.toggle('active', tabName === 'completed');
+      renderList();
+    };
+
+    function renderList() {
+      document.getElementById('loading').style.display = 'none';
+      const container = document.getElementById('anime-list-container');
+      container.innerHTML = '';
+
+      const animeData = allData.animeData || {};
+      const animeOrder = allData.animeOrder || Object.keys(animeData);
+
+      animeOrder.forEach(title => {
+        const anime = animeData[title];
+        if (!anime) return;
+        if (currentTab === 'watching' && anime.status === 'completed') return;
+        if (currentTab === 'completed' && anime.status !== 'completed') return;
+
+        const episodes = anime.episodes || {};
+        const totalEps = anime.totalEpisodes || 0;
+        let watchedEps = 0;
+        
+        // Firebase가 배열로 반환한 경우와 객체인 경우 모두 처리
+        const epKeys = Array.isArray(episodes) ? episodes.map((_, i) => i).filter(i => i !== 0) : Object.keys(episodes);
+        epKeys.forEach(key => { if (episodes[key] && episodes[key].watched) watchedEps++; });
+
+        const card = document.createElement('div');
+        card.className = 'anime-card';
+        card.onclick = () => openDetail(title, anime);
+
+        const badgeClass = anime.status === 'completed' ? 'progress-badge completed-badge' : 'progress-badge';
+        card.innerHTML = `
+          <div class="anime-info">
+            <h3>${title}</h3>
+            <p>총 ${totalEps}화</p>
+          </div>
+          <div class="${badgeClass}">${watchedEps} / ${totalEps}</div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function openDetail(title, anime) {
+      document.getElementById('detail-title').innerText = title;
+      const mainLinkBtn = document.getElementById('detail-main-link');
+      
+      // 메인 링크가 있으면 노출
+      if (anime.url) {
+        mainLinkBtn.href = anime.url;
+        mainLinkBtn.style.display = 'inline-block';
+      } else {
+        mainLinkBtn.style.display = 'none';
+      }
+
+      const epContainer = document.getElementById('episodes-container');
+      epContainer.innerHTML = '';
+
+      const totalEps = anime.totalEpisodes || 0;
+      const episodes = anime.episodes || {};
+
+      for (let i = 1; i <= totalEps; i++) {
+        const ep = episodes[i] || { watched: false, memo: "", url: "" };
+        const row = document.createElement('div');
+        row.className = `ep-row ${ep.watched ? 'watched' : ''}`;
+        
+        let actionsHtml = '';
+        if (ep.url) actionsHtml += `<a href="${ep.url}" target="_blank" class="btn-play">▶ 이동</a>`;
+        if (ep.watched) actionsHtml += `<div class="ep-check-icon">✔️</div>`;
+
+        row.innerHTML = `
+          <div class="ep-info">
+            <span class="ep-number">${i}화</span>
+            ${ep.memo ? `<span class="ep-memo">📝 ${ep.memo}</span>` : ''}
+          </div>
+          <div class="ep-actions">${actionsHtml}</div>
+        `;
+        epContainer.appendChild(row);
+      }
+      document.getElementById('detail-view').classList.add('show');
+    }
+
+    window.closeDetail = function() { document.getElementById('detail-view').classList.remove('show'); }
+    fetchData();
+  </script>
+</body>
+</html>
