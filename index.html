@@ -16,12 +16,16 @@
     .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
     main { padding: 15px; padding-bottom: 80px; }
     
-    /* 애니 카드 드래그 앤 드롭 관련 스타일 */
-    .anime-card { background-color: var(--card-bg); border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); display: flex; justify-content: space-between; align-items: center; cursor: grab; transition: transform 0.2s, box-shadow 0.2s; }
-    .anime-card:active { cursor: grabbing; }
+    /* 애니메이션 카드 및 드래그 핸들 (스크롤 개선) */
+    .anime-card { background-color: var(--card-bg); border-radius: 12px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); display: flex; align-items: stretch; transition: transform 0.2s, box-shadow 0.2s; overflow: hidden; }
     .anime-card.dragging { opacity: 0.5; box-shadow: 0 5px 15px rgba(0,0,0,0.15); transform: scale(0.98); }
     .anime-card.drag-over { border-top: 3px solid var(--primary); }
 
+    .drag-handle { width: 40px; display: flex; align-items: center; justify-content: center; background-color: #f8fafc; color: #9ca3af; font-size: 1.2rem; border-right: 1px solid var(--border); cursor: grab; touch-action: none; }
+    .drag-handle:active { cursor: grabbing; background-color: #e2e8f0; color: #64748b; }
+
+    .anime-content { flex: 1; padding: 16px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+    .anime-content:active { background-color: #f9fafb; }
     .anime-info h3 { font-size: 1rem; margin-bottom: 4px; word-break: keep-all; pointer-events: none; }
     .anime-info p { font-size: 0.8rem; color: var(--text-sub); pointer-events: none; }
     .progress-badge { background-color: #dbeafe; color: var(--primary); padding: 4px 8px; border-radius: 20px; font-size: 0.8rem; font-weight: bold; pointer-events: none; }
@@ -29,6 +33,7 @@
     
     #loading { text-align: center; padding: 40px; color: var(--text-sub); }
     
+    /* 디테일 뷰 영역 */
     #detail-view { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--card-bg); z-index: 20; display: flex; flex-direction: column; transform: translateY(100%); transition: transform 0.3s ease; }
     #detail-view.show { transform: translateY(0); }
     .detail-header { display: flex; align-items: center; padding: 15px; border-bottom: 1px solid var(--border); background-color: var(--card-bg); }
@@ -37,12 +42,12 @@
     .btn-main-link { background: var(--primary); color: white; border: none; padding: 6px 12px; border-radius: 6px; font-size: 0.85rem; cursor: pointer; text-decoration: none; display: inline-block; }
     .episodes-list { flex: 1; overflow-y: auto; padding: 15px; background-color: var(--bg-color); }
     
+    /* 화수 및 메모 수정 기능 영역 */
     .ep-row { background-color: var(--card-bg); padding: 15px; border-radius: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 2px rgba(0,0,0,0.05); transition: background-color 0.2s; }
     .ep-row.watched { background-color: #dcfce7; }
     .ep-info { display: flex; flex-direction: column; gap: 6px; flex: 1; }
     .ep-number { font-weight: bold; font-size: 1rem; }
     
-    /* 메모 편집 가능한 스타일 */
     .ep-memo-box { display: flex; align-items: center; gap: 5px; cursor: pointer; padding: 4px; border-radius: 4px; transition: background-color 0.2s; }
     .ep-memo-box:active { background-color: #e5e7eb; }
     .ep-memo { font-size: 0.85rem; color: var(--text-sub); word-break: break-all; }
@@ -52,7 +57,6 @@
     .btn-play { background-color: #e5e7eb; color: #374151; padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; text-decoration: none; font-weight: bold; }
     .btn-play:active { background-color: #d1d5db; }
     
-    /* 체크 토글 버튼 스타일 */
     .btn-check { background: none; border: none; font-size: 1.4rem; cursor: pointer; padding: 5px; border-radius: 50%; transition: transform 0.1s; }
     .btn-check:active { transform: scale(0.9); }
     .btn-check.checked { color: #16a34a; }
@@ -91,9 +95,6 @@
     
     let allData = {};
     let currentTab = 'watching';
-    let currentAnimeTitle = '';
-
-    // Drag and Drop 변수
     let draggedItem = null;
 
     async function fetchData() {
@@ -129,7 +130,7 @@
       const animeData = allData.animeData || {};
       const animeOrder = allData.animeOrder || [];
 
-      animeOrder.forEach((title, index) => {
+      animeOrder.forEach((title) => {
         const anime = animeData[title];
         if (!anime) return;
         if (currentTab === 'watching' && anime.status === 'completed') return;
@@ -142,42 +143,55 @@
         const epKeys = Array.isArray(episodes) ? episodes.map((_, i) => i).filter(i => i !== 0) : Object.keys(episodes);
         epKeys.forEach(key => { if (episodes[key] && episodes[key].watched) watchedEps++; });
 
+        const badgeClass = anime.status === 'completed' ? 'progress-badge completed-badge' : 'progress-badge';
+
+        // 카드 엘리먼트 생성
         const card = document.createElement('div');
         card.className = 'anime-card';
-        card.draggable = true;
         card.dataset.title = title;
+
+        // 1. 드래그 막대 영역 생성
+        const handle = document.createElement('div');
+        handle.className = 'drag-handle';
+        handle.innerHTML = '☰';
         
-        // 클릭 시 디테일 뷰 열기 (드래그 중이 아닐 때만)
-        card.addEventListener('click', (e) => {
-          openDetail(title, anime);
-        });
+        // PC 마우스 호버 시에만 드래그 허용 활성화
+        handle.addEventListener('mouseenter', () => card.draggable = true);
+        handle.addEventListener('mouseleave', () => card.draggable = false);
 
-        // 드래그 앤 드롭 이벤트 설정
-        card.addEventListener('dragstart', handleDragStart);
-        card.addEventListener('dragover', handleDragOver);
-        card.addEventListener('dragleave', handleDragLeave);
-        card.addEventListener('drop', handleDrop);
-        card.addEventListener('dragend', handleDragEnd);
-
-        // 모바일 터치 드래그 지원을 위한 이벤트
-        card.addEventListener('touchstart', handleTouchStart, {passive: true});
-        card.addEventListener('touchmove', handleTouchMove, {passive: false});
-        card.addEventListener('touchend', handleTouchEnd);
-
-        const badgeClass = anime.status === 'completed' ? 'progress-badge completed-badge' : 'progress-badge';
-        card.innerHTML = `
+        // 2. 클릭 가능한 작품 정보 영역 생성
+        const content = document.createElement('div');
+        content.className = 'anime-content';
+        content.onclick = () => openDetail(title, anime);
+        content.innerHTML = `
           <div class="anime-info">
             <h3>${title}</h3>
             <p>총 ${totalEps}화</p>
           </div>
           <div class="${badgeClass}">${watchedEps} / ${totalEps}</div>
         `;
+
+        card.appendChild(handle);
+        card.appendChild(content);
+
+        // 이벤트 리스너 부착 (PC & 모바일)
+        card.addEventListener('dragstart', handleDragStart);
+        card.addEventListener('dragover', handleDragOver);
+        card.addEventListener('dragleave', handleDragLeave);
+        card.addEventListener('drop', handleDrop);
+        card.addEventListener('dragend', handleDragEnd);
+
+        card.addEventListener('touchstart', handleTouchStart, {passive: true});
+        card.addEventListener('touchmove', handleTouchMove, {passive: false});
+        card.addEventListener('touchend', handleTouchEnd);
+
         container.appendChild(card);
       });
     }
 
     // --- 드래그 앤 드롭 구현 (PC) ---
     function handleDragStart(e) {
+      if (!e.target.closest('.drag-handle')) { e.preventDefault(); return; }
       draggedItem = this;
       setTimeout(() => this.classList.add('dragging'), 0);
     }
@@ -203,16 +217,19 @@
     // --- 드래그 앤 드롭 구현 (모바일 터치) ---
     let touchY = 0;
     function handleTouchStart(e) {
+      // 드래그 막대(☰)를 터치한 게 아니라면 무시 (정상 스크롤 허용)
+      if (!e.target.closest('.drag-handle')) return; 
+      
       draggedItem = this;
       touchY = e.touches[0].clientY;
       setTimeout(() => this.classList.add('dragging'), 0);
     }
     function handleTouchMove(e) {
-      if(!draggedItem) return;
-      e.preventDefault(); // 스크롤 방지
-      const touchLocation = e.targetTouches[0];
+      // 드래그 막대를 잡은 상태에서만 스크롤을 막고 드래그 이벤트 실행
+      if(!draggedItem) return; 
       
-      // 터치 위치에 있는 요소 찾기
+      e.preventDefault();
+      const touchLocation = e.targetTouches[0];
       const targetElement = document.elementFromPoint(touchLocation.clientX, touchLocation.clientY);
       const dropTarget = targetElement?.closest('.anime-card');
       
@@ -230,25 +247,22 @@
       document.querySelectorAll('.anime-card').forEach(c => c.classList.remove('drag-over'));
       this.classList.remove('dragging');
       
-      // 순서 변경 적용 (클릭 방지를 위해 위치 이동이 있었는지 확인)
       if (dropTarget && dropTarget !== draggedItem && Math.abs(touchLocation.clientY - touchY) > 20) {
         swapOrder(draggedItem.dataset.title, dropTarget.dataset.title);
       }
       draggedItem = null;
     }
 
-    // 순서 변경 및 DB 저장
+    // 순서 변경 및 DB에 저장
     async function swapOrder(fromTitle, toTitle) {
       const fromIndex = allData.animeOrder.indexOf(fromTitle);
       const toIndex = allData.animeOrder.indexOf(toTitle);
       
-      // 배열 재배치
       allData.animeOrder.splice(fromIndex, 1);
       allData.animeOrder.splice(toIndex, 0, fromTitle);
       
-      renderList(); // 화면 즉시 업데이트
+      renderList();
       
-      // Firebase 저장
       try {
         await fetch(`${BASE_DB_URL}/animeOrder.json`, {
           method: 'PUT',
@@ -260,9 +274,8 @@
       }
     }
 
-    // --- 디테일 뷰 (화수 체크 / 메모 수정) ---
+    // --- 디테일 뷰 (화수 체크 / 메모 기능) ---
     function openDetail(title, anime) {
-      currentAnimeTitle = title;
       document.getElementById('detail-title').innerText = title;
       const mainLinkBtn = document.getElementById('detail-main-link');
       
@@ -292,12 +305,10 @@
         let actionsHtml = '';
         if (ep.url) actionsHtml += `<a href="${ep.url}" target="_blank" class="btn-play">▶ 영상</a>`;
         
-        // 체크 토글 버튼
         const checkIcon = ep.watched ? '✔️' : '❌';
         const checkClass = ep.watched ? 'checked' : 'unchecked';
         actionsHtml += `<button class="btn-check ${checkClass}" onclick="toggleWatch('${encodeURIComponent(title)}', ${i}, ${ep.watched})">${checkIcon}</button>`;
 
-        // 메모 UI
         const memoHtml = ep.memo 
           ? `<span class="ep-memo">📝 ${ep.memo}</span>` 
           : `<span class="ep-memo-add">+ 메모 추가</span>`;
@@ -315,22 +326,19 @@
       }
     }
 
-    // 화수 체크 토글 기능
+    // 화수 체크 처리
     window.toggleWatch = async function(encodedTitle, epIndex, currentWatched) {
       const title = decodeURIComponent(encodedTitle);
       const newStatus = !currentWatched;
       
-      // 1. 로컬 데이터 업데이트
       if (!allData.animeData[title].episodes[epIndex]) {
         allData.animeData[title].episodes[epIndex] = { watched: false, memo: "" };
       }
       allData.animeData[title].episodes[epIndex].watched = newStatus;
       
-      // 2. 화면 즉시 갱신
       renderEpisodes(title, allData.animeData[title]);
-      renderList(); // 메인 리스트 진행도 갱신
+      renderList();
       
-      // 3. 서버 DB 업데이트
       try {
         await fetch(`${BASE_DB_URL}/animeData/${encodeURIComponent(title)}/episodes/${epIndex}.json`, {
           method: 'PATCH',
@@ -342,25 +350,21 @@
       }
     }
 
-    // 메모 편집 기능
+    // 메모 수정 처리
     window.editMemo = async function(encodedTitle, epIndex) {
       const title = decodeURIComponent(encodedTitle);
       const ep = allData.animeData[title].episodes[epIndex] || { memo: "" };
       
       const newMemo = prompt(`${epIndex}화 메모를 입력하세요:`, ep.memo || "");
       
-      // 취소버튼을 누르지 않은 경우에만 업데이트
       if (newMemo !== null) {
-        // 1. 로컬 데이터 업데이트
         if (!allData.animeData[title].episodes[epIndex]) {
           allData.animeData[title].episodes[epIndex] = { watched: false, memo: "" };
         }
         allData.animeData[title].episodes[epIndex].memo = newMemo;
         
-        // 2. 화면 갱신
         renderEpisodes(title, allData.animeData[title]);
         
-        // 3. 서버 DB 업데이트
         try {
           await fetch(`${BASE_DB_URL}/animeData/${encodeURIComponent(title)}/episodes/${epIndex}.json`, {
             method: 'PATCH',
@@ -377,7 +381,6 @@
       document.getElementById('detail-view').classList.remove('show'); 
     }
     
-    // 초기 실행
     fetchData();
   </script>
 </body>
